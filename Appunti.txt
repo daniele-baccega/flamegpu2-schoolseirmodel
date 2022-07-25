@@ -1,0 +1,4 @@
+Unici dubbi riguardano la gestione dell'ambiente, dei movimenti e delle patches.
+-In particolare, è possibile costruire, ad esempio, una scuola con i muri e tutto il resto?
+-Come è possibile gestire dei movimenti specifici, ad esempio gli agenti che devono passare attraverso le porte ecc.?
+-Esistono le patches o qualcosa di simile?

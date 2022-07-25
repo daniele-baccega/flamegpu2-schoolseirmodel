@@ -1,0 +1,221 @@
+DEFINING A MODEL
+MODEL
+A model in FLAMEGPU2 is equivalent to a model in agent-based modelling terms. It is composed of agents, environmental properties, a set of behaviours which govern how the simulation evolves, and a dependency graph specifying which order the behaviours should occur in. In FLAMEGPU2, models are represented by a ModelDescription object.
+
+ENVIRONMENT
+In FLAMEGPU2, an environment represents simulation parameters which are not tied to any particular instance of an agent. The model environment is represented as a set of properties. FLAMEGPU2 environments are represented by an EnvironmentDescription object.
+Environment properties are values which are the same across the whole simulation, these can be useful for storing mathematical constants and system state information. Environment properties can only be updated during host functions, however they can be read during agent functions.
+
+AGENTS
+Agents are the central component of FLAME GPU simulations, and are directly equivalent to agent-based modelling agents. However, they can also be used to represent other things such as scalar fields across the environment. Agents are represented by an AgentDescription object.
+Agent variables should be used to store data which is unique to each instance of an agent, for example, each individual predator in a predator-prey simulation would have its own position and hunger level. Each variable has a name and a type.
+All agents have a built in id variable. This is a number which uniquely identifies this agent. Each agent will automatically be assigned an ID when the simulation starts or the agent is birthed. There is currently no way to change the ID of an agent. The agent ID variable is of type id_t which is an unsigned int by default, but can be redefined if more IDs are required.
+Agent states are usually used to group sets of behaviours. For example, a predator in a predator-prey simulation may have a resting state and a hunting state. All newly defined agent types will have a default state, but you can add additional states if you wish to. States can be defined through the AgentDescription object.
+
+DEFINING BEHAVIOURS
+AGENT FUNCTIONS
+Most behaviours within your model will be implemented using agent functions. Agent functions allow you to modify agent variables, change state and interact with the environment or other agents. Each agent function in FLAMEGPU2 is associated with a particular agent type and is represented by an AgentFunctionDescription object. This object describes the name of the function, the agent state in which it should be active, and any state transitions it should apply to the agent. The implementation code for the behaviour is written separately and is identified by using the FLAMEGPU_AGENT_FUNCTION macro to label the code. Alternatively, the implementations can be written in strings and loaded at runtime. The latter method is the only method supported for the python version of FLAMEGPU2.
+An agent function is defined using the FLAMEGPU_AGENT_FUNCTION macro. This takes three arguments: a unique name identifying the function, an input message communication strategy, and an output message communication strategy.
+If you wish to define regular functions which can be used within agent function definitions, you can use the FLAMEGPU_DEVICE_FUNCTION macro.
+If you wish to define regular functions which can be used within agent function definitions and in host code, you can use the FLAMEGPU_HOST_DEVICE_FUNCTION macro.
+
+MODIFYING AGENT VARIABLES
+Each instance of an agent will have its own copy of each of the agent variables specified in the agent type definition. These can be accessed and modified within agent functions.
+Within an agent function, variables can be read via the DeviceAPI with getVariable() and written to with setVariable(). These variables are accessed from higher latency device memory, so for the best performance, we recommended that you avoid multiple reads or writes to the same variable in any agent functions and do as much as possible with the local copy. The agent ID built-in variable can be accessed via the getID method.
+Agent variables can also be arrays, accessing these requires extra arguments. It is not possible to retrieve or set a full array in a single function call, during agent functions, elements must be accessed individually.
+
+INTERACTING WITH THE ENVIRONMENT
+Agent functions can only read environmental properties. If you wish to modify an environmental property, this must be done through Host Functions.
+IF NECESSARY, LOOK BETTER TO THE MACRO PROPERTIES!
+
+AGENT COMMUNICATION
+Communication between agents in FLAMEGPU2 is handled through messages. Messages contain variables which are used to transmit information between agents.
+Defining a message type in FLAMEGPU2 requires selection of a communication strategy and specification of the data the message will contain. FLAMEGPU2 comes with several built-in communication strategies, described below. It can also be extended to support bespoke messaging types. For guidance on this see the file include/flamegpu/runtime/messaging.h. For each message type, the communication strategy defines how the messages will be accessed.
+Messages can be output by agent functions. Each agent function can output a single message. To output a message from an agent function, the communication strategy and message type must be specified. The communication strategy is set in the third parameter of the agent function definition, and must match that of the message type.
+
+Bucket Messaging Bucket Messages each have an associated bucket index, of an integer type such as int or unsigned int. The Bucket indices are a sequential set of integers, between a configurable lower and upper bound, using the setUpperBound(), setLowerBound() and setBounds() methods on the BucketMessage::Description class.
+
+Spatial Messaging If you are using MessageSpatial2D or MessageSpatial3D then your message type will automatically have float variables x, y (and z for 3D) added to the message. These correspond to the message’s spatial location and must be set in your agent function. You must also specify the interaction radius via the MessageDescription (2D, 3D) object.
+
+Array Messaging If you are using MessageArray, MessageArray2D or MessageArray3D then you must specify the corresponding array index when outputting a message. It is important that only 1 agent writes a message to each index (if SEATBELTS is enabled then multiple outputs to the same index will raise an exception).
+
+Reading a message is very similar to sending one. The second argument in the agent function definition defines the input message communication strategy.
+With the input message type specified, the message list will be available in the agent function definition. The message list can be iterated over to access each message.
+
+If you are using the Bucket messaging strategy, you will also need to supply the bucket index/key to access the messages from the specific bucket. If an invalid bucket index is provided (based on the bounds), then either a device exception will be thrown if available (SEATBELTS=ON<SEATBELTS>), or no messages will be returned.
+
+If you are using one of the spatial messaging strategies, you will also need to supply the x and y coordinates of this agent to access the relevant messages.
+Spatial messaging will return all messages within the radius specified at the model description time, however it can also return some messages which fall outside of this radius. So it is important that messages are distance checked to ensure they fall within the radius.
+
+If you are using one of the array messaging strategies, there are several methods for accessing messages.
+IF NECESSARY, LOOK BETTER TO THE ARRAY MESSAGING!
+
+CONDITIONAL BEHAVIOURS
+Agent function conditions are specified using the FLAMEGPU_AGENT_FUNCTION_CONDITION, this differs from the normal agent function macro as only the function condition name must be specified.
+Agent function conditions are primarily used to split agent populations, allowing them to diverge between agent states. As such, when creating an AgentFunctionDescription the initial and end states for the executing agent must be specified. Following this, all agents in the specified initial state will execute the agent function and move to the end state. In order to allow agents in the same state to diverge an agent function condition must be added to the function.
+Agent function conditions are executed by all agents before the main agent function, and must return either true or false. Agents which return true pass the function and continue to execute the agent function and transition to the end state.
+
+HOST FUNCTIONS
+Not all model behaviours can be achieved with agent functions. Some behaviours need to operate over at a level above agents, host functions provide this functionality. If you need to perform a reduction over an agent population, sort agents or update environment properties a host function can deliver.
+There are several ways that host functions can be added to a model; init, exit, step and layer.
+They can be added as init functions, which execute once at the start when CUDASimulation::simulate() is called. If multiple init functions are added to a model, they will be executed in the order that they were added to the model.
+They can be added as exit functions, which execute once after all steps have completed when CUDASimulation::simulate() is called. If multiple exit functions are added to a model, they will be executed in the order that they were added to the model.
+They can be added as step functions, which execute each model step after all layers have executed. If multiple step functions are added to a model, they will be executed in the order that they were added to the model.
+They can also be added to individual layers, so that they can execute between agent functions each model step. Host functions must be the only functions within a layer.
+
+Host functions have access to the HostAPI. This has similarities to the DeviceAPI available within agent functions, however different functionality is available.
+
+Agent tools
+Host agent operations are performed on a single agent state, the state can be omitted if agents exist within the default state. Various reduction operators are provided, to allow specific agent variables to be reduced across the population (sum, meanStandardDeviation, min, max, count, histogramEven).
+The C++ API also has access to custom reduction and transform-reduction operations.
+Agent populations can also be sorted according to a variable, the C++ API can additionally sort according to two variables. FLAMEGPU2 may automatically sort agent populations that are outputting spatial messages, as this can significantly improve performance when reading messages.
+
+It’s also possible to create new agents with the HostAgentAPI, this is covered in Agent Birth from Host Functions. These agents are not created until after the layer has completed execution, so they will not affect reductions or sorts carried out in the same host function. This is the preferred method of host agent birth as it performs a single host-device memory copy.
+
+For raw access to agent data, DeviceAgentVector can be used. This has an interface similar to AgentVector, however automatically synchronises data movement between host and device. This should only be used in limited circumstances as copying memory between host and device has high latency.
+
+Environment Properties
+HostAPI access to environment properties goes further than the DeviceAPI, allowing environment properties to be updated too. Only environment properties marked const, during model definition cannot be updated.
+
+Macro Environment Properties
+Similar to regular environment properties, macro environment properties can be read and updated within host functions. However, there is an additional limitation that any accessed macro environment property must not being accessed by an agent function in the same layer, as this may cause a race condition.
+IF NECESSARY, LOOK BETTER TO THE MACRO PROPERTIES!
+
+Random Generation
+Usage of the HostAPI random methods matches that of the DeviceAPI (uniform, normal, logNormal).
+When calling any of these methods the type must be specified. Most methods only support floating point types (e.g. float, double), with the exception of the parametrised uniform method which is restricted to integer types.
+Additionally the HostAPI random object has the ability to retrieve and update the seed used for random generation during the current model execution. However, for most users this will likely be unnecessary as the random seed can be configured before simulations are executed.
+
+These other methods are also available within HostAPI for use within host functions: getStepCounter().
+
+INITIAL CONDITIONS
+AGENT POPULATIONS
+To initialise your model it is necessary to create the initial agent populations. These can either be statically defined in a flat file, or dynamically generated.
+Populations of agents in FLAMEGPU2 are represented by the AgentVector type. A population can be created by supplying the type of agent, and number of agents to create.
+
+INITIALISING AGENT VARIABLES
+To initialise a population, iterate over the AgentVector object and set the variables for each agent.
+A single agent can be individually accessed by indexing into the AgentVector object.
+Agent variables can be initialised with randomly generated data.
+
+INITIALISATION FROM DISK
+FLAMEGPU2 simulations can be initialised from disk using either the XML or JSON format. The XML format is compatible with the previous FLAMEGPU1 input/output files, whereas the JSON format is new to FLAMEGPU2. In both cases, the input and output file formats are the same.
+Loading simulation state (agent data and environment properties) from file can be achieved via either command line specification, or explicit specification within the code for the model.
+In most cases, the input file will be taken from command line which can be passed using -i <input file>.
+Agent IDs must be unique when the file is loaded from disk, otherwise an AgentIDCollision exception will be thrown. This must be corrected in the input file, as there is no method to do so within FLAMEGPU2.
+In most cases, components of the input file are optional and can be omitted if defaults are preferred. If agents are not assigned IDs within the input file, they will be automatically generated.
+IF NECESSARY, LOOK BETTER TO THE INITIALISATION FROM DISK!
+
+RUNNING A SIMULATION
+DEFINING EXECUTION ORDER
+Once the agents and behaviours of your model have been specified, you must define the dependencies present in the model. Specifying a dependency, e.g. a depends on b ensures that function a will not run until function b has completed. This can be used to define the order you want behaviours to take place in, and to ensure that a function which outputs messages is complete before another function attempts to read them.
+Dependencies are specified between AgentFunctionDescription, Submodel and HostFunctionDescription objects. These are specified using the dependsOn method.
+Any of the objects can depend on multiple other objects.
+Each model has an associated dependency graph which is accessed via a ModelDescription.
+Any functions or submodels which have no dependencies are roots. These must be added to the dependency graph.
+
+When you have specified all your dependencies and roots, you must instruct the model to generate execution layers from the dependency graph.
+If you wish to see the actual layers generated, you can use the getConstructedLayersString() method of the dependency graph to obtain a string representation of the layers.
+
+FLAMEGPU2 can automatically produce a GraphViz format graph of your dependency tree. You can use this to visually validate that behaviours will be happening in the order you expect them to.
+
+FLAMEGPU2 will automatically determine the optimal execution layers using the DependencyGraph, but you can specify them manually if you wish. To do so, create LayerDescription objects, one representing each execution layer. Manually created layers will execute in the order they are defined. You should not mix manual layer creation with the dependency specification method.
+
+CREATING A SIMULATION
+In order to execute a model a CUDASimulation object must be created from the model. You can then initialise it, set the population data and finally calling simulate() will execute the model.
+
+SIMULATION EXIT CONDITIONS
+Simulations can exit either after a specified number of steps, or when a particular condition is met.
+The number of steps can be set through the SimulationConfig method of a CUDASimulation object.
+Conditional exit from the simulation can be controlled through the use of the FLAMEGPU_EXIT_CONDITION macro. These are specified in the same way as other host functions, but return either CONTINUE or EXIT.
+If a model has multiple exit condition functions, they will be executed in the order that they were added to the model. When multiple exit conditions are defined, conditions are only executed if earlier exit condition functions return flamegpu::CONTINUE.
+
+COLLECTING DATA
+As Simulations are likely to involve thousands to millions of agents, logging the full simulation state would produce large amounts of output most of which is not required. As such, FLAMEGPU provides the ability to specify a subset of population level reductions and environment properties to be logged each step or at simulation exit.
+To define a logging config, you should declare either a LoggingConfig or StepLoggingConfig, passing your ModelDescription to the constructor. These two classes share the same interface for specifying data to be logged, however StepLoggingConfig additionally allows you specify setLoggingFrequency() to adjust how often steps are logged (default 1, every step).
+Environment properties are logged with logEnvironment(), specifying the property’s name.
+Agent data is logged according to agent state, so agent’s with multiple states must have the config specified for each state required to be logged. The total number of agents in the state can be logged with logCount(). Or variable reductions can be logged with; logMean(), logStandardDev(), logMin(), logMax(), logSum() specifying the variable’s name and type (in the same form as used throughout the API).
+
+After configuring a CUDASimulation to use specific logging configs, and executing the simulation, the log can be accessed via code using getRunLog(). This returns a structure combining the step and exit logs that were requested.
+
+Instead of processing logged data at runtime, you can store it to file for post-processing at a later time. This is achieved by specifying output path configuration arguments, either via the command line at runtime or in code. In order to pass arguments via the command line, it is necessary to ensure that command line args (argc, argv) are passed to CUDASimulation, either the constructor or to initialise().
+
+In some limited cases, you may want to directly access a full agent population. This can only be achieved in code, either directly accessing the agent data or specifying that it should be sent to file. Similar to specifying an initial agent population, you can fetch an agent population. Alternatively, exportData() can be called to export the full simulation state to file (agent variables and environment properties).
+
+CONFIGURING EXECUTION
+The CUDASimulation instance provides a range of configuration options which can be controlled directly in code, or via the command line interface. The below table details the variables available in code, and the arguments available to the command line interface. In order for the command line arguments to be processed argc and argv must be passed to initialise().
+To configure the simulation in code the variables must be updated via the SimulationConfig() and CUDAConfig() structures. Subsequently applyConfig() must be called, to implement any changes to the configuration.
+
+AGENT BIRTH/DEATH
+AGENT BIRTH FROM AGENT FUNCTIONS
+The agent creation interface usable in agent functions is only able to create a single agent per existing agent per iteration. Additionally, the agent type and state being created must be earlier specified as part of the model description.
+Note: Agents created by agent functions do not exist until the next layer.
+
+To create agents from agent functions, you must specify the type of agent the function produces when defining your agent functions.
+When agent output has been enabled for an agent function, the FLAMEGPU->agent_out object will become available within agent function definitions. This can be used to initialise the properties of the newly created agent.
+Agent variables which are not manually set will be initialised with their default values.
+
+By default, agent creation is mandatory for an agent function which has agent output enabled. If you don’t want all the agents the function runs for to output an agent, you can enable optional agent output.
+With this set, a new agent will only be created if one of the FLAMEGPU->agent_out variables is set manually.
+
+Agents can also be created using host step functions.
+
+AGENT DEATH
+By default in FLAMEGPU2 agents do not die. To enable death for a particular agent function, use the setAllowAgentDeath method of the AgentFunctionDescription object.
+To have an agent die, simply return flamegpu::DEAD; instead of return flamegpu::ALIVE; at the end of a death-enabled agent function. You can use conditionals to only have agents die according to a certain condition.
+
+SUBMODELS
+DEFINING A SUBMODEL
+A submodel acts as a full model nested inside a parent model, the only requirement is that the model contains atleast one exit condition. Agent variables can be mapped between the two models, with each model also having private agent variables (or even private agents). The agent ID of bound agents will always be mapped. Unbound agents which are recreated in each submodel run are not guaranteed to have the same ID between runs. Environment properties can also be shared with submodels, with the ability to mark them as constant within the submodel.
+Where an agent variable is mapped between model and submodel, the parent model’s default value will always be used when creating new agents.
+A submodel must exist independently within a layer of the parent model, it cannot execute simultaneously with other agent or host functions.
+Models may contain multiple submodels, and submodels may contain sub-submodels. The only limitation to submodel nested, is that circular dependencies are not permitted (e.g. a submodel adding it’s parent model as a submodel).
+
+A submodel as defined the same as a regular model, via a ModelDescription. It must then be added to the model which should host the submodel. Mappings between agent states, agent variables and environment properties can then be created. When mapping variables and properties, they must be of the same type and length.
+When calling SubAgentDescription::bindAgent(), it is also possible to automatically bind compatible states and variables.
+IF NECESSARY, LOOK BETTER TO THE SUBMODELS!
+
+RUNNING MULTIPLE SIMULATIONS
+LAUNCHING ENSEMBLES
+An ensemble is a group of simulations executed in batch, optionally using all available GPUs. To use an ensemble, construct a RunPlanVector and CUDAEnsemble instead of a CUDASimulation. RunPlanVector is a data structure which can be used to build run configurations, specifying simulation speed, steps and initialising environment properties. These vectors can be combined.
+First you must define a model as usual, followed by creating a CUDAEnsemble.
+Then you construct the RunPlanVector that will be executed.
+Operations performed on the vector, will apply to all elements, whereas individual elements can also be updated directly. It is also possible to specify subdirectories for particular runs’ logging output to be sent to, this can be useful when constructing large batch runs or parameter sweeps. After which, you configure which data will be logged. Finally you can execute/run the ensemble of simulations using the RunPlanVector.
+
+VISUALISATION
+BUILDING WITH VISUALISATION
+To use the visualisation features you must ensure that you are using a build of FLAME GPU with visualisation enabled.
+Visualisation is enabled by setting the VISUALISATION CMake option to ON during CMake Configuration.
+
+CONFIGURING A VISUALISATION
+To create a FLAME GPU visualisation, you must configure and activate the visualisation.
+There are many options available within ModelVis to control how the visualisation works.
+
+By default, when the CUDASimulation returns from the call to simulate() after the model has completed, the program will continue and likely exit. If you would prefer to prevent this, and keep the visualisation open, so the final state of the model can be explored, the visualisation can be joined to prevent program execution continuing until the visualisation window has been closed.
+
+VISUALISING AGENTS
+The main purpose of FLAME GPU visualisations is to display the agents. By default no agents are visualised, and each agent to be visualised must be configured.
+Currently FLAME GPU only supports loading static models from .obj (wavefront) format files.
+It is suggested that low-poly models are used, as each model will be drawn once per agent. Which potentially multiplies the polygon count by millions, which can significantly impact the performance of the visualiser.
+
+Agent variables can be used to control an agent’s position with the visualisation. It is required that atleast one component is set, otherwise agents will all remain at the origin.
+By default, if an agent has float variables with names x, y and z, these will be used for the agent’s position.
+However, you can use other variables if you have used different variable names or an array variable.
+
+Agent direction can be linked to agent variables similar to that of agent position, this will cause the model used for the agent to rotate in the given direction. However, there are several options to choose from depending on how direction is stored within your model.
+You can specify the forward vector of the agent (e.g. it’s velocity), which are used to derive the agent’s yaw and pitch. This can optionally be extended by specifying an up vector, which will be used to derive agent’s roll.
+Alternatively, you can directly specify the yaw, pitch and roll variables.
+IF NECESSARY, LOOK BETTER TO THE YAW, PITCH, ROLL AND UP VARIABLES!
+
+Similar to agent position and direction, agent variables can be used to set a scale multiplier for the model used.
+First you should set the base model scale (with setModelScale()), and then the multiplier used will multiply by this value (so an agent variable with value 1, would be at the base scale). If you would prefer to provide the absolute model scale via agent variables, then specify a model scale of 1.
+
+There are a wide range of options for controlling the color of agent models.
+
+Additional configurations are possible, to differentiate multi-state agents in each of their states. Agent’s in different states can be differentiated by their: model, model scale and color.
+A palette can be specified to automatically assign specialised agent states a new color.
+
+VISUALISING ADDITIONAL DETAILS
+In addition to visualising agents, you may wish to visualise the environment bounding box, or environment properties.
+FLAME GPU visualisations allow you to define static line drawings, from either line segments or a single polyline as part of the visualisation config.
+These can be useful to denote the bounding area of the environment, or other details.

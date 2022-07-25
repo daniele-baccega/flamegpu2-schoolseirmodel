@@ -8,6 +8,7 @@ FLAMEGPU_AGENT_FUNCTION(output_message, flamegpu::MessageNone, flamegpu::Message
         FLAMEGPU->getVariable<float>("z"));
     return flamegpu::ALIVE;
 }
+
 FLAMEGPU_AGENT_FUNCTION(move, flamegpu::MessageSpatial3D, flamegpu::MessageNone) {
     const int ID = FLAMEGPU->getVariable<int>("id");
     const float REPULSE_FACTOR = FLAMEGPU->environment.getProperty<float>("repulse");
@@ -50,6 +51,7 @@ FLAMEGPU_AGENT_FUNCTION(move, flamegpu::MessageSpatial3D, flamegpu::MessageNone)
     FLAMEGPU->setVariable<float>("drift", cbrt(fx*fx + fy*fy + fz*fz));
     return flamegpu::ALIVE;
 }
+
 FLAMEGPU_STEP_FUNCTION(Validation) {
     static float prevTotalDrift = FLT_MAX;
     static unsigned int driftDropped = 0;
@@ -65,8 +67,9 @@ FLAMEGPU_STEP_FUNCTION(Validation) {
     // printf("Avg Drift: %g\n", totalDrift / FLAMEGPU->agent("Circle").count());
     printf("%.2f%% Drift correct\n", 100 * driftDropped / static_cast<float>(driftDropped + driftIncreased));
 }
+
 int main(int argc, const char ** argv) {
-    flamegpu::ModelDescription model("Circles_BruteForce_example");
+    flamegpu::ModelDescription model("Circles_BruteForce_Example");
 
     const unsigned int AGENT_COUNT = 16384;
     const float ENV_MAX = static_cast<float>(floor(cbrt(AGENT_COUNT)));
@@ -136,7 +139,7 @@ int main(int argc, const char ** argv) {
             const float ENV_MIN = 0;
             const int DIM = static_cast<int>(ceil((ENV_MAX - ENV_MIN) / RADIUS));  // Spatial partitioning scales up to fit none exact environments
             const float DIM_MAX = DIM * RADIUS;
-            auto pen = m_vis.newLineSketch(1, 1, 1, 0.2f);  // white
+            auto pen = m_vis.newLineSketch(1, 1, 1, 0.2f);  // White
             // X lines
             for (int y = 0; y <= DIM; y++) {
                 for (int z = 0; z <= DIM; z++) {
